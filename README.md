@@ -1,6 +1,6 @@
-# FoxReach — Let AI Start the Conversation
+# Trade_Outreach_AI — Let AI Start the Conversation
 
-FoxReach is a **B2B outbound sales / foreign trade** AI prototype that turns structured customer background data into actionable insights, a sales strategy, and stage-aware outreach emails—then closes the loop with **human approval**, **send/schedule**, and an **event-driven state machine**.
+Trade_Outreach_AI is a **B2B outbound sales / foreign trade** AI prototype that turns structured customer background data into actionable insights, a sales strategy, and stage-aware outreach emails—then closes the loop with **human approval**, **send/schedule**, and an **event-driven state machine**.
 
 > Goal: move sales work from “research + write from scratch” to “capture structured context → AI drafts strategy + email → human approves → consistent follow-up cadence”.
 
@@ -14,7 +14,7 @@ In outbound sales, the real cost is rarely “sending”—it’s:
 - Inconsistent follow-up: cadence depends on individuals, not a system
 - Untrustworthy AI: generic outputs, or worse—hallucinated “facts”
 
-FoxReach’s design principles:
+Trade_Outreach_AI’s design principles:
 - **Structured-first**: AI relies on persisted `CustomerBackground` in the database (auditable, reusable), not transient prompt text
 - **Layered generation**: profile → strategy → stage-aware email drafts
 - **Controlled loop**: AI creates drafts, but they must be `pending_approval` until a human reviews
@@ -153,17 +153,17 @@ Verify:
 - http://localhost:8000/system/status
 
 ### 3) Configure frontend proxy
-Create/edit `foxreach-frontend/.env.local`:
+Create/edit `Trade_Outreach_AI-frontend/.env.local`:
 
 ```env
-FOXREACH_BACKEND_URL=http://localhost:8000
+Trade_Outreach_AI_BACKEND_URL=http://localhost:8000
 ```
 
 > Restart `npm run dev` after changing `.env.local`.
 
 ### 4) Start frontend (Next.js)
 ```bash
-cd foxreach-frontend
+cd Trade_Outreach_AI-frontend
 npm install
 npm run dev
 ```
