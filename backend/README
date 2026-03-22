@@ -1,1 +1,136 @@
+# AI_Outreach_System — Backend (FastAPI)
 
+This folder is the backend of my outreach workflow experiment.  
+I built it while trying to answer a practical question: **can I make AI-generated outreach emails feel “safe enough” to use in a real process?**  
+For me, “safe enough” means: the model should not invent facts, drafts should be reviewable, and follow-ups should be driven by a simple state machine instead of my memory.
+
+This backend provides the core capabilities: customer data, structured background storage, AI draft generation (initial + follow-ups), draft review workflow, sending/scheduling, and event/state updates.
+
+---
+
+## What this backend does (in plain words)
+
+- Stores **customers** and **structured customer background** (this is the only allowed AI input).
+- Generates:
+  - an **initial outreach strategy + first email draft**, or
+  - the **next follow-up draft** based on a customer state machine (1/3/7 cadence idea).
+- Saves every generated email as a **draft** (`pending_approval`) so a human can edit before sending.
+- Sends emails immediately or schedules them using a customer’s timezone.
+- Records events (sent/opened/replied) and updates the customer state.
+
+---
+
+## Why I made “structured background” the center
+
+My biggest worry with LLMs is hallucination: they can write details that sound reasonable but are not real (certifications, MOQ, lead time, success metrics…).
+
+So I try to reduce that risk with two ideas:
+1. **Constrain the input**: the model can only use structured data saved in DB (plus internal knowledge and value content blocks).
+2. **Separate generation from execution**: generation only creates drafts, and sending is a separate reviewed step.
+
+---
+
+## Quickstart (local)
+
+### 1) Create and activate a virtualenv
+```bash
+python -m venv venv
+.\venv\Scripts\pip.exe install -r requirements.txt
+```
+
+### 2) Run the API server
+```bash
+.\venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+Then open:
+- API base: http://localhost:8000
+- Status: http://localhost:8000/system/status
+
+---
+
+## Configuration (environment variables)
+
+This backend relies on environment variables. The important ones:
+
+- **LLM**
+  - `OPENAI_API_KEY` (or `LLM_API_KEY`)
+  - `OPENAI_MODEL` (or `LLM_MODEL`)
+  - If no API key is configured, generation endpoints fail fast (so I don’t accidentally trust fake output).
+
+- **SMTP (sending emails)**
+  - `EMAIL_SMTP_HOST`, `EMAIL_SMTP_PORT`
+  - `EMAIL_USERNAME`, `EMAIL_PASSWORD`
+  - `TRACK_BASE_URL` (used for tracking pixel/click rewrite)
+  - `MESSAGE_ID_DOMAIN`
+
+---
+
+## Main modules (how I organized the code)
+
+### API layer (FastAPI routers)
+- Customers + background: `app/api/customers.py`
+- Emails (drafts, send-now, schedule): `app/api/emails.py`
+- Strategy generation (initial): `app/api/strategy.py`
+- Follow-ups (next draft, due drafts): `app/api/followups.py`
+- System info + country list: `app/api/system.py`
+
+### Service layer (business logic)
+- `StrategyEngineService`: initial strategy + first email draft
+- `FollowUpOrchestratorService`: chooses follow-up stage/angle and generates the next draft
+- `EmailAutomationService`: draft storage, sending/scheduling, event recording, state updates
+- `FollowUpStateService`: customer outreach state machine
+- `CompanyKnowledgeService` / `ValueContentService`: internal knowledge blocks to ground outputs
+
+### Data layer
+- SQLAlchemy models: `app/models/*`
+- Small repositories for CRUD patterns: `app/repositories/*`
+- Database setup: `app/database.py`
+
+---
+
+## API overview (the endpoints I actually use)
+
+### Customers / Background
+- `GET  /customers/` — list customers (includes current state fields for UI)
+- `POST /customers/` — create customer (idempotent by email)
+- `PUT  /customers/{id}` — update identity fields (name, first_name, country, time_zone, etc.)
+- `GET  /customers/{id}/background` — get structured background (nullable)
+- `PUT  /customers/{id}/background` — upsert structured background
+
+### Generation
+- `POST /strategy/generate` — initial strategy + initial email draft
+- `POST /followups/generate-next` — next follow-up draft (stage decided by state machine)
+
+### Draft workflow / Sending
+- `POST /emails/compose` — store a draft (`pending_approval`)
+- `GET  /emails/{id}` — read a draft
+- `PUT  /emails/{id}` — update editable draft fields (subject/body/country/time_zone)
+- `GET  /emails/pending-approval` — list pending approval drafts
+- `POST /emails/send-now` — send an approved draft immediately
+- `POST /emails/schedule` — schedule delivery by desired local hour
+- `POST /emails/events` — record events (opened/replied)
+
+### System
+- `GET /system/status` — backend + LLM config status
+- `GET /system/countries` — country/region list + default timezone mapping
+
+---
+
+## Draft-first workflow
+
+My personal rule: **the model can propose, but it can’t execute**.
+
+So the backend always stores generated emails as drafts (`pending_approval`) and the user must review/edit before sending. This also makes debugging easier: I can inspect exactly what was generated and what was finally sent.
+
+---
+
+## Notes / limitations
+
+- Open tracking is a weak signal (many clients block pixels), so I don’t treat “opened” as a guaranteed event.
+- A prompt constraint helps, but it’s not a perfect hallucination solution. Real prevention would include output verification (e.g., “facts_used + source fields”)—this is something I want to explore next.
+- SQLite is used for a simple demo setup. For actual long-term use, Postgres + migrations would be the next step.
+
+---
+
+If you’re reviewing this as a teacher/interviewer: I’m happy to explain how the state machine drives follow-ups, how I try to constrain the model inputs, and why I separated “generation” from “sending” as a safety mechanism.
