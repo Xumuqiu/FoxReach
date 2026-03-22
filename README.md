@@ -1,226 +1,157 @@
-# Trade_Outreach_AI — Let AI Start the Conversation
+# AI_Outreach_System (AI Outreach Emails + Follow-up Cadence Experiment)
 
-Trade_Outreach_AI is a **B2B outbound sales / foreign trade** AI prototype that turns structured customer background data into actionable insights, a sales strategy, and stage-aware outreach emails—then closes the loop with **human approval**, **send/schedule**, and an **event-driven state machine**.
+I started it for a simple reason: in B2B outreach (especially export sales), the daily work is repetitive—collect customer info, think through what to say, write the first email, follow up on day 1/3/7, and keep track of whether the customer replied or engaged. It’s easy to lose consistency and waste time.
 
-> Goal: move sales work from “research + write from scratch” to “capture structured context → AI drafts strategy + email → human approves → consistent follow-up cadence”.
-
----
-
-## Background
-
-In outbound sales, the real cost is rarely “sending”—it’s:
-- Fragmented context: customer background lives across notes, LinkedIn, websites, spreadsheets
-- High writing overhead: different stages (initial / follow-up / opened / replied) require different intent and tone
-- Inconsistent follow-up: cadence depends on individuals, not a system
-- Untrustworthy AI: generic outputs, or worse—hallucinated “facts”
-
-Trade_Outreach_AI’s design principles:
-- **Structured-first**: AI relies on persisted `CustomerBackground` in the database (auditable, reusable), not transient prompt text
-- **Layered generation**: profile → strategy → stage-aware email drafts
-- **Controlled loop**: AI creates drafts, but they must be `pending_approval` until a human reviews
-- **State-driven**: events (sent/opened/replied) update `CustomerState`, which selects the next prompt path
+This repo is a runnable version of what I built while exploring how AI can fit into a controlled workflow: it stores customer background in a structured way, generates email drafts, requires human review before sending, supports send/schedule, and uses a state machine to drive follow-ups.
 
 ---
 
-## Workflow (End-to-End)
+## What I’m trying to solve
 
-### 1) Customer & Background Intake (Sales Input)
-1. Open Dashboard
-2. Create a customer (name/email/company/industry, etc.)
-3. Fill the **Customer Detail** form (full `CustomerBackground` schema)
-4. Click **Save Background** to persist structured context in DB
+- **Writing emails is slow**: every email starts from scratch.
+- **Follow-ups break easily**: the 1/3/7 cadence is often managed manually and gets messy.
+- **AI can “make things up”**: my biggest concern is not tone—it’s hallucination (details that sound plausible but are not real).
 
-### 2) AI Strategy Generation (Real LLM Output)
-- After saving background, click **Write Outreach Email**
-- The system loads `CustomerBackground` from DB and generates:
-  - **Customer Profile (structured understanding)**
-  - **Outreach Strategy (sales strategy)**
-  - **Initial Draft Email (subject/body)**
-
-> If the backend is missing `OPENAI_API_KEY`, strategy/follow-up generation returns **503** (no fake/mock output).
-
-### 3) Human Approval
-- Generated drafts are stored as `pending_approval`
-- The Dashboard **Follow-up Board** lists all pending drafts
-- Click **Review** to open the email review page:
-  - edit subject/body
-  - schedule send or send immediately
-
-### 4) Send & Events (State Machine)
-- Send Now / Schedule Send writes EmailEvent(`sent`)
-- When `opened` / `replied` events happen (webhook or manual simulation):
-  - EmailEvent is recorded
-  - `CustomerState` advances accordingly
-
-### 5) Stage-Aware Follow-ups
-- When the customer is no longer `NEW_LEAD` (e.g., `CONTACTED`, `EMAIL_OPENED`, `FOLLOWUP_1`…)
-- The system generates the next draft using a **stage-specific prompt** (still `pending_approval`)
+So I made a design choice early on:  
+**the LLM is only allowed to use structured customer background stored in the database + internal company knowledge + value content blocks.**  
+No temporary form inputs, and as little “free improvisation” as possible.
 
 ---
 
-## Architecture
+## Core idea (my view on “controlled AI”)
 
-### High-level
-- **Frontend**: Next.js + Tailwind + shadcn UI (intake, approval, send)
-- **Frontend API Proxy**: Next.js `/api/*` routes (same-origin proxy to backend, avoids CORS)
-- **Backend**: FastAPI + SQLAlchemy (business logic, state machine, scheduler, LLM calls)
-- **DB**: SQLite (self-contained demo/dev)
-- **Scheduler**: APScheduler (daily scan to generate due follow-up drafts)
+I treat the system as a loop:
 
-### Core data model
-- `Customer`: identity (who we sell to)
-- `CustomerBackground`: structured context (what we know)
-- `CustomerState`: outreach state machine (where we are)
-- `Email`: drafts + send records (`pending_approval`, `sent`, `opened`, `replied`)
-- `EmailEvent`: event log (`sent`, `opened`, `replied`)
-- `EmailSchedule`: scheduled send entries
-- `EmailAccount`: sending identity/provider config
+1. **Turn information into structured data** (customer background, company capabilities, cases, etc.)
+2. **Constrain the model with prompts** (use only provided fields; do not invent facts)
+3. **Never send directly after generation**: store as a draft and let a human review
+4. **Sending/scheduling is a separate step**: traceable and auditable
+5. **Use a state machine to drive the follow-up cadence**, so the system can recommend the next action
 
-### State machine (simplified)
-- `NEW_LEAD` → `CONTACTED` → `FOLLOWUP_1` → `FOLLOWUP_2` → `FOLLOWUP_3` → `STOPPED`
-- Event-driven interrupts:
-  - `EMAIL_OPENED`
-  - `REPLIED` (stops automation)
+The point is: even if the model is unstable, the workflow is still safe (at least it won’t “auto-send”).
 
 ---
 
-## Features
+## Features (current status)
 
-### Frontend (Product UX)
-- Demo login (localStorage session)
-- Customer Dashboard 3-column layout:
-  - Customer List: create/select/delete customers
-  - Customer Detail: full structured background intake (aligned with backend schema)
-  - Follow-up Board: lists `pending_approval` drafts and opens Review
-- Email Review Page:
-  - Customer Header: name/industry/status
-  - AI Strategy Card: profile, purchasing behavior, price range, decision maker, recommended approach
-  - Customer Insight Card: market position, target customers, product style, sustainability focus
-  - Generated Email Card: editable subject/body
-  - Send Now / Schedule Send
+### 1) Customer management & structured background
+- Create/delete customers
+- Edit contact name (used for greetings)
+- Country/region selection with timezone mapping (used for scheduled sending)
 
-### Backend (Business + AI)
-- Customer CRUD
-- Background upsert/read (`CustomerBackground` as the AI input source)
-- Strategy engine:
-  - uses structured background + internal knowledge base + value blocks
-  - returns structured profile + strategy + initial email draft
-- Follow-up generator:
-  - selects stage-aware prompts based on `CustomerState`
-  - generates the next follow-up draft as `pending_approval`
-- Email automation:
-  - draft storage, edit, approval list
-  - send now, schedule send
-  - event recording and state updates
-- Scheduler:
-  - daily scan for due customers (1–3–7 cadence)
-  - generates `pending_approval` follow-up drafts
+### 2) Initial outreach generation (NEW_LEAD)
+- Reads customer background + internal knowledge + value content
+- Generates a strategy (profile/strategy) and the first email draft
+- Stores the draft in DB as `pending_approval`
 
-### “Product-like” qualities (not a school demo)
-- Explicit `pending_approval` workflow (AI never sends directly)
-- State-driven prompts (different emails for different stages)
-- Fail-fast AI: missing LLM config returns 503, never fake output
-- Same-origin `/api/*` proxy for clean DX and safer config handling
-- Structured context persistence enables iterative improvement and auditability
+### 3) Follow-up generation (1/3/7 cadence)
+- Chooses follow-up stage based on customer state
+- Includes the previous 1–2 outreach emails to reduce repetition
+- Uses different “angles” per stage, and logs the angle so repeated drafts don’t recycle the same approach
+
+### 4) Draft review & sending
+- Review page allows editing subject/body
+- Send Now
+- Schedule Send by customer local hour (wheel-style UI)
+
+### 5) Sending content cleanup (real-world issues I ran into)
+- I had problems like subject prefixes, incomplete subjects, and HTML/placeholder residue showing up in received emails
+- The send pipeline now normalizes subject, cleans body, and ensures consistent plain/html MIME parts
 
 ---
 
-## Demo (Local Setup)
+## Architecture overview (how I split modules)
 
-> Backend runs on **:8000**. Frontend runs on **:3000** and calls backend through `/api/*` proxy routes.
+### Frontend (Next.js App Router)
+- `Dashboard`: customer management, background form, draft generation entry, pending-approval board
+- `Email Review`: view/edit drafts, send/schedule
+- Browser calls only `/api/*` (same-origin proxy), and Next.js forwards to FastAPI (avoids CORS)
 
-### Requirements
-- Python 3.x
-- Node.js LTS (for frontend)
+### Backend (FastAPI + SQLAlchemy)
+- **Data models** (simplified):
+  - `Customer`: identity (who)
+  - `CustomerBackground`: structured context (what we know)
+  - `Email`: drafts + sent records (`pending_approval`, `sent`, …)
+  - `EmailEvent`: events like sent/opened/replied
+  - `EmailSchedule`: scheduled sending tasks
+  - `CustomerState`: outreach state machine (drives follow-ups)
 
-### 1) Configure backend LLM (required for real AI)
-Create/edit `.env` in repo root:
+- **Service layer** (by responsibility):
+  - `StrategyEngineService`: initial strategy + first email draft
+  - `FollowUpOrchestratorService`: follow-up draft orchestration
+  - `EmailAutomationService`: compose drafts, send/schedule, record events, update state
+  - `SMTPTransport`: SMTP sending + tracking + content cleanup
 
-```env
-OPENAI_API_KEY=YOUR_OPENAI_KEY
-OPENAI_MODEL=gpt-4o
-```
+---
 
-### 2) Start backend (FastAPI)
-From repo root:
+## Running locally (how I run it)
 
+### Backend
 ```bash
-# Windows example (venv)
-.\venv\Scripts\python.exe main.py
+# From project root
+python -m venv venv
+.\venv\Scripts\pip.exe install -r requirements.txt
+
+.\venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-Verify:
-- http://localhost:8000/system/status
-
-### 3) Configure frontend proxy
-Create/edit `Trade_Outreach_AI-frontend/.env.local`:
-
-```env
-Trade_Outreach_AI_BACKEND_URL=http://localhost:8000
-```
-
-> Restart `npm run dev` after changing `.env.local`.
-
-### 4) Start frontend (Next.js)
+### Frontend
 ```bash
-cd Trade_Outreach_AI-frontend
+cd tradeoutreachai-frontend
 npm install
-npm run dev
+npm run dev -- --port 3001
 ```
 
-Open:
-- http://localhost:3000/
-
-### 5) Recommended demo script (3 minutes)
-1. Homepage → **Try Demo** → Login (Use Demo / Login)
-2. Dashboard → Create customer
-3. Customer Detail → fill structured background → Save Background
-4. Click **Write Outreach Email**
-5. Review Page → edit → Send Now / Schedule Send
-6. Follow-up Board shows pending approval drafts / updated status
-7. (Optional) Simulate `opened` / `replied` via API and observe state changes
+URLs:
+- Frontend: http://localhost:3001
+- Backend: http://localhost:8000 (status: `/system/status`)
 
 ---
 
-## API Overview (Backend)
+## Hard parts & trade-offs (my own notes)
 
-> The frontend calls Next.js `/api/*` proxies. The backend endpoints are:
+### 1) How much can this prevent hallucination?
+I’m leaning on engineering constraints rather than “trusting the model”:
+- Input: structured background only (reduces free invention)
+- Output: draft is never auto-sent; human review is mandatory
 
-### Customers
-- `POST /customers/`
-- `GET /customers/` (includes state fields for UI badges)
-- `GET /customers/{id}/background`
-- `PUT /customers/{id}/background`
+Remaining risk:
+- The model can still add plausible but unsupported “facts” (MOQ, certifications, lead time, etc.)
+- My next step would be “fact referencing/verification”: require `facts_used` with source fields, and run a pre-send check.
 
-### Strategy / Value Content
-- `POST /strategy/generate`
-- `POST /value-content/generate`
+### 2) Why store drafts in DB?
+For me this is the key step to make AI usable in a real workflow:  
+stored drafts = reviewable, editable, traceable, and measurable.
 
-### Emails
-- `POST /emails/compose` (stores `pending_approval`)
-- `GET /emails/pending-approval`
-- `GET /emails/{id}`
-- `PUT /emails/{id}` (persist edits)
-- `POST /emails/send-now`
-- `POST /emails/schedule`
-- `POST /emails/events` (opened/replied)
-
-### Follow-ups
-- `GET /followups/state/{customer_id}`
-- `POST /followups/generate-next`
-- `POST /followups/generate-due` (scheduler)
+### 3) Why a state machine?
+Follow-up is not “generate another email”—it’s “decide the next action.”  
+A state machine helps ensure consistency: who to follow up, which step, when, and when to stop.
 
 ---
 
-## Roadmap
-- Real auth (JWT / cookie session)
-- Real email transport (SMTP/SendGrid/Gmail API) + observability
-- Versioned strategy/profile persistence (Strategy table + AB testing)
-- Configurable per-account cadence and timezone-aware scheduling
-- Automated event ingestion (tracking pixel + inbound reply webhook)
-- Feedback loop: reply outcomes → prompt/strategy tuning
+## Next steps (if I keep building)
+- **More complete tracking**: reliable reply/bounce attribution (IMAP/Webhooks)
+- **More controllable outputs**: source references, key-fact checks, risk warnings
+- **Could be a personal productivity tool**: a Python CLI to run daily actions quickly (add/bg/draft/send/schedule)
+- **Production readiness**: Postgres migration, backups, logging, rate limiting, compliance (stop outreach)
 
 ---
 
-## License
-Prototype / internal use.
+## Demonstration
+Step1. Sales inputs structured customer background instead of raw text.
+<img width="1213" height="1416" alt="客户背调数据填入" src="https://github.com/user-attachments/assets/a0f6e603-b1e2-451f-bd09-1e37562c9cf0" />
+
+Step2. The system first generates a strategy before writing emails. Email is generated based on structured data and strategy.
+<img width="147" height="68" alt="image" src="https://github.com/user-attachments/assets/e9f30746-8b55-4b01-8b02-9fb49fdb60f7" />
+
+Step3. Human-in-the-loop ensures controllability before sending. Emails are scheduled based on customer timezone.
+<img width="2476" height="1360" alt="邮件发送确认页面" src="https://github.com/user-attachments/assets/e90dee7b-5f39-47e3-b2b0-9562488f2fc9" />
+<img width="583" height="399" alt="image" src="https://github.com/user-attachments/assets/9049c12c-cce0-48b8-a757-f45e4b88741b" />
+
+Step4. System tracks events and updates customer state automatically.
+<img width="607" height="662" alt="image" src="https://github.com/user-attachments/assets/636a756f-0af0-4837-b338-c4bdea9519f8" />
+
+Step5. Follow-ups are automatically generated with different angles.
+Still under developing...
+
+
