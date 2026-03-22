@@ -1,9 +1,0 @@
-from app.api.customers import router as customers_router
-from app.api.company import router as company_router
-from app.api.value_content import router as value_content_router
-from app.api.strategy import router as strategy_router
-from app.api.emails import router as emails_router
-from app.api.followups import router as followups_router
-from app.api.leads import router as leads_router
-from app.api.system import router as system_router
-from app.api.track import router as track_router
